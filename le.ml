@@ -6,11 +6,10 @@ module Shim(Cohttp_client : Cohttp_lwt.S.Client) = struct
   end
   module Body = Cohttp_lwt__.Body
   include Cohttp_client
-
-
 end
 
 module Make
+    (Kv : Mirage_kv.RW)
     (Time : Mirage_time.S)
     (Http_server : Cohttp_mirage.Server.S)
     (Http_client : Cohttp_lwt.S.Client)
@@ -18,16 +17,18 @@ module Make
   module Http_client_shim = Shim(Http_client)
   module Acme = Letsencrypt.Client.Make(Http_client_shim)
 
+  let cert_key = Mirage_kv.Key.v "certificate"
+  let pk_key = Mirage_kv.Key.v "pk"
   let http_port = 80
   let https_port = 443
+
+  let prefix = ".well-known", "acme-challenge"
+  let tokens = Hashtbl.create 1
 
   let cn host = X509.[Distinguished_name.(Relative_distinguished_name.singleton (CN host))]
 
   let csr host key =
     X509.Signing_request.create (cn host) key
-
-  let prefix = ".well-known", "acme-challenge"
-  let tokens = Hashtbl.create 1
 
   let solver _host ~prefix:_ ~token ~content =
     Hashtbl.replace tokens token content;
@@ -88,9 +89,7 @@ module Make
       Acme.initialise ~ctx ~endpoint (`RSA http_connection_pk) >>= fun lets_encrypt ->
       let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
       let solver = Letsencrypt.Client.http_solver solver in
-      Acme.sign_certificate ~ctx solver lets_encrypt sleep csr >|= 
-      fun certs ->
-      `Single (certs, priv)
+      Acme.sign_certificate ~ctx solver lets_encrypt sleep csr >|= fun certs -> (certs, priv)
 
   let serve cb =
     let callback _ = cb
@@ -98,19 +97,51 @@ module Make
     in
     Http_server.make ~conn_closed ~callback ()
 
-  let rec provision host http_server_impl http_client =
+  let retrieve kv =
     let open Lwt.Infix in
-    Logs.info (fun m -> m "listening on tcp/%d for Let's Encrypt provisioning" http_port);
-    (* "this should be cancelled once certificates are retrieved",
-     * says the source material *)
-    let letsencrypt_http_server = http_server_impl (`TCP http_port) @@ serve letsencrypt_dispatch in
-    Lwt.dont_wait (fun () -> letsencrypt_http_server) (fun _ex -> ());
-    provision_certificate host http_client >>= function
-    | Error (`Msg s) -> Logs.err (fun f -> f "error provisioning TLS certificate: %s" s);
-      (* Since the error may be transient, wait a bit and try again *)
-      Time.sleep_ns (Duration.of_min 15) >>= fun () ->
-      provision host http_server_impl http_client
-    | Ok certificates ->
-      Lwt.return certificates
+    Lwt_result.both (Kv.get kv cert_key) (Kv.get kv pk_key) >>= function
+    | Error e -> Lwt.return @@ Error (`Msg (Format.asprintf "%a" Kv.pp_error e))
+    | Ok (certs, pk) ->
+      match
+        (X509.Certificate.decode_pem_multiple @@ Cstruct.of_string certs),
+        (X509.Private_key.decode_pem @@ Cstruct.of_string pk)
+      with
+      | Ok cert_list, Ok private_key -> Lwt.return @@ Ok (cert_list, private_key)
+      | Error (`Msg s), _ -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
+      | _, Error (`Msg s) -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
+
+  let rec provision host kv http_server_impl http_client =
+    let open Lwt.Infix in
+    retrieve kv >>= function
+    | Ok (cert, pk) ->
+      (* TODO: figure out the real correct amount of time to wait before renewing *)
+      Lwt.return ((cert, pk), Duration.of_day 80)
+    | Error (`Msg s) ->
+      Logs.debug (fun f -> f "error getting cert and pk from the cert store: %s" s);
+      Logs.info (fun m -> m "listening on tcp/%d for Let's Encrypt provisioning" http_port);
+      (* "this should be cancelled once certificates are retrieved",
+       * says the source material *)
+      let letsencrypt_http_server = http_server_impl (`TCP http_port) @@ serve letsencrypt_dispatch in
+      Lwt.dont_wait (fun () -> letsencrypt_http_server) (fun _ex -> ());
+      provision_certificate host http_client >>= function
+      | Error (`Msg s) ->
+        let wait_duration = 15 in
+        Logs.err (fun f -> f "error provisioning TLS certificate: %s" s);
+        (* Since the error may be transient, wait a bit and try again *)
+        Logs.err (fun f -> f "waiting %d minutes, then trying again" wait_duration);
+        Time.sleep_ns (Duration.of_min wait_duration) >>= fun () ->
+        provision host kv http_server_impl http_client
+      | Ok (certificates, pk) ->
+        let certs_to_save = X509.Certificate.encode_pem_multiple certificates in
+        let pk_to_save = X509.Private_key.encode_pem pk in
+        Lwt_result.both
+          (Kv.set kv cert_key @@ Cstruct.to_string certs_to_save)
+          (Kv.set kv pk_key @@ Cstruct.to_string pk_to_save) >>= function
+          | Ok ((), ()) ->
+            Logs.debug (fun f -> f "saved private key and certs in the cert store");
+            Lwt.return ((certificates, pk), Duration.of_day 80)
+          | Error e ->
+            Logs.err (fun f -> f "error saving private key and certs: %a" Kv.pp_write_error e);
+            Lwt.return ((certificates, pk), Duration.of_day 80)
 
 end
