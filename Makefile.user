@@ -1,2 +1,0 @@
-run:
-	sudo solo5-hvt --net:service=tap100 dist/oauth2.hvt --ipv4 10.0.0.2/24 --ipv4-gateway 10.0.0.1 --production true --host we-have.legitcreds.us -l application:debug
