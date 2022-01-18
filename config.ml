@@ -5,6 +5,7 @@ open Mirage
 let packages = [
   Functoria.package "letsencrypt";
   Functoria.package "uri";
+  Functoria.package "base64";
   Functoria.package ~sublibs:["kv"] "chamelon";
   Functoria.package ~sublibs:["ocaml"] "digestif";
   Functoria.package ~sublibs:["ocaml"] "checkseum";
@@ -24,7 +25,7 @@ let host =
 let keys = List.map Key.abstract [ host ]
 
 let main =
-  foreign ~packages ~keys "Unikernel.Main" (block @-> block @-> pclock @-> time @-> http @-> http_client @-> job)
+  foreign ~packages ~keys "Unikernel.Main" (block @-> block @-> pclock @-> time @-> random @-> http @-> http_client @-> job)
 
 let () =
-  register "oauth2" [ main $ certs_block $ webapp_block $ default_posix_clock $ default_time $ http_srv $ http_client_imp ]
+  register "oauth2" [ main $ certs_block $ webapp_block $ default_posix_clock $ default_time $ default_random $ http_srv $ http_client_imp ]

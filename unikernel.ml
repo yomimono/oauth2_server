@@ -1,9 +1,12 @@
 open Lwt.Infix
 
 module Webapp
+    (Random : Mirage_random.S)
     (Clock : Mirage_clock.PCLOCK)
     (KV : Mirage_kv.RW)
     (H : Cohttp_mirage.Server.S) = struct
+
+  module PKCE = Pkce.Make(Random)
 
   let not_found = (
     Cohttp.Response.make ~status:Cohttp.Code.(`Not_found) (),
@@ -18,7 +21,10 @@ module Webapp
     Cohttp_lwt__.Body.of_string "Bad request")
 
   let reply _ _ _ = 
-    let callback _ _ _ = Lwt.return @@ ise
+    let callback _ _ _ =
+      let _verifier = PKCE.verifier () in
+      let _challenge = PKCE.challenge verifier in
+      Lwt.return @@ ise
     in
     H.make ~conn_closed:(fun _ -> ()) ~callback ()
 end
@@ -28,6 +34,7 @@ module Main
     (App_block : Mirage_block.S)
     (Clock : Mirage_clock.PCLOCK)
     (Time : Mirage_time.S)
+    (Random : Mirage_random.S)
     (Http : Cohttp_mirage.Server.S)
     (Client : Cohttp_lwt.S.Client)
 = struct
@@ -35,9 +42,9 @@ module Main
   module Cert_database = Kv.Make(Cert_block)(Clock)
   module App_database = Kv.Make(App_block)(Clock)
   module LE = Le.Make(Cert_database)(Time)(Http)(Client)
-  module OAuth2 = Webapp(Clock)(App_database)(Http)
+  module OAuth2 = Webapp(Random)(Clock)(App_database)(Http)
 
-  let start cert_block app_block pclock _time http_server http_client =
+  let start cert_block app_block pclock _time _random http_server http_client =
     let open Lwt.Infix in
     let start_time = Ptime.v @@ Pclock.now_d_ps () in
     let host = Key_gen.host () in
