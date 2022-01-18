@@ -14,7 +14,7 @@ let stack = generic_stackv4v6 default_network
 let conduit = conduit_direct ~tls:true stack
 let http_srv = cohttp_server conduit
 let http_client_imp = cohttp_client (resolver_dns stack) conduit
-let shortener_block = block_of_file "shortener"
+let webapp_block = block_of_file "webapp"
 let certs_block = block_of_file "certs"
 
 let host =
@@ -27,4 +27,4 @@ let main =
   foreign ~packages ~keys "Unikernel.Main" (block @-> block @-> pclock @-> time @-> http @-> http_client @-> job)
 
 let () =
-  register "oauth2" [ main $ certs_block $ shortener_block $ default_posix_clock $ default_time $ http_srv $ http_client_imp ]
+  register "oauth2" [ main $ certs_block $ webapp_block $ default_posix_clock $ default_time $ http_srv $ http_client_imp ]
