@@ -11,8 +11,8 @@ creds :
 	format --block-size=512 {{cert_fs}}
 	cat ~/oauth2_test_creds/pk | lfs_write --verbosity=debug {{cert_fs}} 512 /pk -
 	cat ~/oauth2_test_creds/certificate | lfs_write --verbosity=debug {{cert_fs}} 512 /certificate -
-	lfs_read  {{cert_fs}} 512 /certificate|grep CERTIFICATE
-	lfs_read -v {{cert_fs}} 512 /pk|grep PRIVATE
+	cat ~/oauth2_test_creds/keystring | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
+	cat ~/oauth2_test_creds/shared_secret | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
 
 tap :
 	sudo ip tuntap add {{hypervisor_tap}} mode tap
