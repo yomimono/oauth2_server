@@ -7,7 +7,7 @@ hypervisor_uplink := "eth0"
 hypervisor_tap := "tap100"
 
 creds :
-	dd if=/dev/zero of={{cert_fs}} bs=4K count=2
+	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
 	format --block-size=512 {{cert_fs}}
 	cat ~/oauth2_test_creds/pk | lfs_write --verbosity=debug {{cert_fs}} 512 /pk -
 	cat ~/oauth2_test_creds/certificate | lfs_write --verbosity=debug {{cert_fs}} 512 /certificate -

@@ -86,9 +86,11 @@ module Make
       exit 1
     | Ok csr ->
       let http_connection_pk = Mirage_crypto_pk.Rsa.generate ~bits:4096 () in
+      Logs.debug (fun f -> f "keys made; initializing acme server");
       Acme.initialise ~ctx ~endpoint (`RSA http_connection_pk) >>= fun lets_encrypt ->
       let sleep sec = Time.sleep_ns (Duration.of_sec sec) in
       let solver = Letsencrypt.Client.http_solver solver in
+      Logs.debug (fun f -> f "attempting to get certificate signed");
       Acme.sign_certificate ~ctx solver lets_encrypt sleep csr >|= fun certs -> (certs, priv)
 
   let serve cb =
