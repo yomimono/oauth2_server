@@ -108,7 +108,8 @@ module Make
         (X509.Certificate.decode_pem_multiple @@ Cstruct.of_string certs),
         (X509.Private_key.decode_pem @@ Cstruct.of_string pk)
       with
-      | Ok cert_list, Ok private_key -> Lwt.return @@ Ok (cert_list, private_key)
+      | Ok cert_list, Ok private_key ->
+        Lwt.return @@ Ok (cert_list, private_key)
       | Error (`Msg s), _ -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
       | _, Error (`Msg s) -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
 

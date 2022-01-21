@@ -1,16 +1,14 @@
 cert_fs := "credstore.chamelon"
 webapp_fs := "webapp.chamelon"
 guest_ip := "10.0.0.2"
-fqdn := "we-have.legitcreds.us"
+fqdn := "stitchbridge.legitcreds.us"
 hypervisor_ip := "10.0.0.1"
-hypervisor_uplink := "eth0"
+hypervisor_uplink := "wlan0"
 hypervisor_tap := "tap100"
 
 creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
 	format --block-size=512 {{cert_fs}}
-	cat ~/oauth2_test_creds/pk | lfs_write --verbosity=debug {{cert_fs}} 512 /pk -
-	cat ~/oauth2_test_creds/certificate | lfs_write --verbosity=debug {{cert_fs}} 512 /certificate -
 	cat ~/oauth2_test_creds/keystring | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
 	cat ~/oauth2_test_creds/shared_secret | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
 
@@ -44,3 +42,12 @@ unforward :
 
 start :
 	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --ipv4-gateway={{hypervisor_ip}}
+
+new :
+	curl -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/etsy
+
+extant :
+	#!/bin/bash
+	id=$(lfs_ls {{webapp_fs}} 512 /|head -1)
+	echo curl -k --data uuid=${id} https://{{guest_ip}}/etsy|cut -d' ' -f1
+	curl -k --data uuid=${id} https://{{guest_ip}}/etsy|cut -d' ' -f1
