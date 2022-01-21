@@ -27,29 +27,33 @@ module Main
       Lwt.return_unit
     | Ok cert_kv ->
       Logs.info (fun f -> f "block-backed key-value store for certs up and running");
-      App_database.connect ~program_block_size:16 ~block_size:512 app_block >>= function
-      | Error e -> Logs.err (fun f -> f "failed to initialize block-backed key-value store for appplication: %a" App_database.pp_error e);
+      Cert_database.get cert_kv (Mirage_kv.Key.v "keystring") >>= function
+      | Error e -> Logs.err (fun f -> f "Couldn't retrieve the keystring from the cert store: %a" Cert_database.pp_error e);
         Lwt.return_unit
-      | Ok kv ->
-        LE.provision host cert_kv http_server http_client >>= fun ((certificates, pk), renew_after) ->
-        Logs.debug (fun f -> f "usable certificates found in the cert store (valid for %Ld ns)" renew_after);
-        let rec provision () =
-          let tls_cfg = Tls.Config.server ~certificates:(`Single (certificates, pk)) () in
-          let tls = `TLS (tls_cfg, `TCP 443) in
-          let https =
-            Logs.info (fun f -> f "(re-)initialized https listener");
-            http_server tls @@ OAuth2.reply kv host start_time
+      | Ok keystring ->
+        App_database.connect ~program_block_size:16 ~block_size:512 app_block >>= function
+        | Error e -> Logs.err (fun f -> f "failed to initialize block-backed key-value store for appplication: %a" App_database.pp_error e);
+          Lwt.return_unit
+        | Ok kv ->
+          LE.provision host cert_kv http_server http_client >>= fun ((certificates, pk), renew_after) ->
+          Logs.debug (fun f -> f "usable certificates found in the cert store (valid for %Ld ns)" renew_after);
+          let rec provision () =
+            let tls_cfg = Tls.Config.server ~certificates:(`Single (certificates, pk)) () in
+            let tls = `TLS (tls_cfg, `TCP 443) in
+            let https =
+              Logs.info (fun f -> f "(re-)initialized https listener");
+              http_server tls @@ OAuth2.reply ~keystring kv host start_time
+            in
+            let expire = Time.sleep_ns renew_after in
+            let http =
+              let port = `TCP 80 in
+              http_server port @@ OAuth2.reply ~keystring kv host start_time
+            in
+            Lwt.pick [
+              https ;
+              http ;
+              expire] >>= fun () ->
+            provision ()
           in
-          let expire = Time.sleep_ns renew_after in
-          let http =
-            let port = `TCP 80 in
-            http_server port @@ OAuth2.reply kv host start_time
-          in
-          Lwt.pick [
-            https ;
-            http ;
-            expire] >>= fun () ->
           provision ()
-        in
-        provision ()
 end

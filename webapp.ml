@@ -61,13 +61,19 @@ module Make
     Cohttp.Response.make ~status:Cohttp.Code.(`Bad_request) (),
     Cohttp_lwt__.Body.of_string "Bad request")
 
-  let reply kv _host _start_time = 
+  let ok_empty = (
+    Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
+    Cohttp_lwt__.Body.empty)
+
+  let reply ~keystring kv host _start_time = 
     let callback _connection request body =
       let endpoint = Mirage_kv.Key.v @@ Uri.path @@ Cohttp.Request.uri request in
       let meth = Cohttp.Request.meth request in
-      match meth, Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" with
-      | _, false -> Lwt.return not_found
-      | `POST, true -> begin
+      match meth with
+      | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
+        Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
+        Lwt.return @@ ok_empty
+      | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
           Cohttp_lwt__.Body.to_form body >>= fun entries ->
           match List.assoc_opt "uuid" entries with
           | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
@@ -77,11 +83,22 @@ module Make
             | Error `Storage -> Logs.err (fun f -> f "error retrieving uuid-related information from storage, failing");
               Lwt.return ise
             | Ok (state, verifier) ->
-              let response = Cohttp.Response.make ~status:Cohttp.Code.(`OK) () in
-              let body = Cohttp_lwt__.Body.(of_string @@ state ^ "\n" ^ verifier) in
+              Logs.debug (fun f -> f "state and verifier found or made for request; generating redirect URI for resource server");
+              let parameters = [
+                "response_type", ["code"];
+                "client_id", [keystring];
+                "redirect_uri", ["https://" ^ host ^ "/etsy" ];
+                "scope", ["listings_r listings_w"];
+                "state", [state];
+                "code_challenge", [PKCE.challenge verifier];
+                "code_challenge_method", ["S256"];
+              ] in
+              let url = Uri.make ~scheme:"https" ~host:"etsy.com" ~path:"/oauth/connect" ~query:parameters () in
+              let headers = Cohttp.Header.init_with "Location" (Uri.to_string url) in
+              let response = Cohttp.Response.make ~status:Cohttp.Code.(`Temporary_redirect) ~headers () in
+              let body = Cohttp_lwt__.Body.of_string "<html><body>Redirecting...</body></html>" in
               Lwt.return (response, body)
-        end
-      | _, true -> Lwt.return @@ ise
+      | _ -> Lwt.return @@ ise
     in
     H.make ~conn_closed:(fun _ -> ()) ~callback ()
 end

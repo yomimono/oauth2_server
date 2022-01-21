@@ -9,8 +9,8 @@ hypervisor_tap := "tap100"
 creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
 	format --block-size=512 {{cert_fs}}
-	cat ~/oauth2_test_creds/keystring | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
-	cat ~/oauth2_test_creds/shared_secret | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
+	cat ~/oauth2_test_creds/keystring | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
+	cat ~/oauth2_test_creds/shared_secret | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
 
 tap :
 	sudo ip tuntap add {{hypervisor_tap}} mode tap
@@ -44,10 +44,9 @@ start :
 	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --ipv4-gateway={{hypervisor_ip}}
 
 new :
-	curl -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/etsy
+	curl -v -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/auth
 
 extant :
 	#!/bin/bash
-	id=$(lfs_ls {{webapp_fs}} 512 /|head -1)
-	echo curl -k --data uuid=${id} https://{{guest_ip}}/etsy|cut -d' ' -f1
-	curl -k --data uuid=${id} https://{{guest_ip}}/etsy|cut -d' ' -f1
+	id=$(lfs_ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
+	curl --verbose -k --data uuid=${id} https://{{guest_ip}}/auth
