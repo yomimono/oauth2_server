@@ -19,35 +19,17 @@ module Make
 
   module PKCE = Pkce.Make(Random)
 
+  let code = Mirage_kv.Key.v "code"
   let state = Mirage_kv.Key.v "state"
   let verifier = Mirage_kv.Key.v "verifier"
 
-  let start_auth kv uuid =
-    let new_state = PKCE.verifier () in
+  let start_auth kv =
+    let new_state = PKCE.verifier () |> String.map (function '/' -> '.' | a -> a) in
     let new_verifier = PKCE.verifier () in
-    Lwt_result.both
-      (Kv.set kv Mirage_kv.Key.(uuid // state) new_state)
-      (Kv.set kv Mirage_kv.Key.(uuid // verifier) new_verifier) >>= function
+    Kv.set kv Mirage_kv.Key.(v new_state // verifier) new_verifier >>= function
     | Error e -> Logs.err (fun f -> f "error storing new state and verifier: %a" Kv.pp_write_error e);
       Lwt.return @@ Error `Storage
-    | Ok ((), ()) -> Lwt.return @@ Ok (new_state, new_verifier)
-
-  let lookup_state kv uuid =
-    (* it's very annoying that "state" is overloaded to mean a specific secret
-     * in Etsy's OpenAPI 3, because I would like to use "state" to mean
-     * "the current state of the OAuth2 transaction related to this ID, as deduced
-     * from the presence of items in the database" :/ *)
-    (* TODO: this should look up what's in the database related to this UUID,
-     * and return a useful state thing related to it *)
-    let uuid = Mirage_kv.Key.v uuid in
-    Lwt_result.both
-      (Kv.get kv @@ Mirage_kv.Key.(uuid // state))
-      (Kv.get kv @@ Mirage_kv.Key.(uuid // verifier)) >>= function
-    | Ok (state, verifier) -> Lwt.return @@ Ok (state, verifier)
-    | Error Kv.(`Not_found _) -> start_auth kv uuid
-    | Error e ->
-      Logs.err (fun f -> f "error looking up a uuid's state: %a" Kv.pp_error e);
-      Lwt.return (Error `Lookup)
+    | Ok () -> Lwt.return @@ Ok (new_state, new_verifier)
 
   let not_found = (
     Cohttp.Response.make ~status:Cohttp.Code.(`Not_found) (),
@@ -70,14 +52,36 @@ module Make
       let endpoint = Mirage_kv.Key.v @@ Uri.path @@ Cohttp.Request.uri request in
       let meth = Cohttp.Request.meth request in
       match meth with
-      | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
+      | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" -> begin
         Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
-        Lwt.return @@ ok_empty
+        let request = Cohttp.Request.uri request in
+        match Uri.get_query_param request "code", Uri.get_query_param request "state" with
+        | None, _ | _, None ->
+          Logs.debug (fun f -> f "GET from /etsy without required params");
+          Lwt.return @@ bad_request
+        | Some this_code, Some this_state ->
+          Kv.exists kv (Mirage_kv.Key.v this_state) >>= function
+          | Ok None -> Lwt.return @@ bad_request
+          | Error e -> Logs.err (fun f -> f "error retrieving a state: %a" Kv.pp_error e);
+            Lwt.return @@ ise
+          | Ok (Some `Value) -> Logs.err (fun f -> f "state was a value, not a dictionary; refusing to store code");
+            Lwt.return @@ ise
+          | Ok (Some `Dictionary) ->
+            Kv.set kv Mirage_kv.Key.(v this_state // code) this_code >>= function
+            | Error e -> Logs.err (fun f -> f "got a valid looking code for a real state,
+                                      but failed to save it: %a" Kv.pp_write_error e);
+              Lwt.return @@ ise
+            | Ok () ->
+              (* TODO: should start a dont_wait to ask for some tokens *)
+              Lwt.return @@ ok_empty
+
+      end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
           Cohttp_lwt__.Body.to_form body >>= fun entries ->
           match List.assoc_opt "uuid" entries with
           | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
-          | Some (uuid::[]) -> lookup_state kv uuid >>= function
+          | Some (uuid::[]) ->
+            start_auth kv >>= function
             | Error `Lookup -> Logs.err (fun f -> f "error looking up uuid, failing");
               Lwt.return ise
             | Error `Storage -> Logs.err (fun f -> f "error retrieving uuid-related information from storage, failing");
