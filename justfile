@@ -12,6 +12,10 @@ creds :
 	cat ~/oauth2_test_creds/keystring | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
 	cat ~/oauth2_test_creds/shared_secret | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
 
+newdb :
+	dd if=/dev/zero of={{webapp_fs}} bs=1M count=1
+	format --block-size=512 {{webapp_fs}}
+
 tap :
 	sudo ip tuntap add {{hypervisor_tap}} mode tap
 	sudo ip addr add {{hypervisor_ip}}/24 dev tap100
@@ -44,9 +48,12 @@ start :
 	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --ipv4-gateway={{hypervisor_ip}}
 
 new :
-	curl -v -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/auth
+	#!/bin/bash
+	loc=$(curl -v -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/auth 2>&1 | grep location|cut -f3 -d' ')
+	echo "loc: $loc"
 
 extant :
 	#!/bin/bash
 	id=$(lfs_ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
 	curl --verbose -k --data uuid=${id} https://{{guest_ip}}/auth
+	curl --verbose -k --data uuid=${id} https://{{guest_ip}}/token

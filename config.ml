@@ -6,6 +6,7 @@ let packages = [
   Functoria.package "letsencrypt";
   Functoria.package "uri";
   Functoria.package "base64";
+  Functoria.package "yojson";
   Functoria.package ~sublibs:["kv"] "chamelon";
   Functoria.package ~sublibs:["ocaml"] "digestif";
   Functoria.package ~sublibs:["ocaml"] "checkseum";

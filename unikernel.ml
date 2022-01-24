@@ -14,7 +14,7 @@ module Main
   module Cert_database = Kv.Make(Cert_block)(Clock)
   module App_database = Kv.Make(App_block)(Clock)
   module LE = Le.Make(Cert_database)(Time)(Http)(Client)
-  module OAuth2 = Webapp.Make(Random)(Clock)(App_database)(Http)
+  module OAuth2 = Webapp.Make(Random)(Clock)(App_database)(Http)(Client)
 
   let start cert_block app_block pclock _time _random http_server http_client =
     let open Lwt.Infix in
