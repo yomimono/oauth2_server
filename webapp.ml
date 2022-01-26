@@ -25,7 +25,7 @@ module Make
   let verifier = Mirage_kv.Key.v "verifier"
 
   let start_auth kv =
-    let new_state = PKCE.verifier () |> String.map (function '/' -> '.' | a -> a) in
+    let new_state = PKCE.verifier () in
     let new_verifier = PKCE.verifier () in
     Kv.set kv Mirage_kv.Key.(v new_state // verifier) new_verifier >>= function
     | Error e -> Logs.err (fun f -> f "error storing new state and verifier: %a" Kv.pp_write_error e);
@@ -48,7 +48,7 @@ module Make
     Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
     Cohttp_lwt__.Body.empty)
 
-  let request_token ~keystring kv http_client state =
+  let request_token ~keystring ~host kv http_client state =
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v state // verifier)) @@
       Kv.get kv Mirage_kv.Key.(v state // code) >>= function
@@ -57,11 +57,12 @@ module Make
     | Ok (this_verifier, this_code) ->
       Logs.debug (fun f -> f "constructing request for tokens");
       (* this is where we have to make our own request to the remote server *)
+      let redirect_uri = "https://" ^ host ^ "/etsy" in
       let host = "api.etsy.com"
       and path = "v3/public/oauth/token"
       and scheme = "https"
       in
-      let redirect_uri = "https://" ^ host ^ "/etsy" in
+      Logs.debug (fun f -> f "asking for stuff with verifier %s, which goes with challenge %s" this_verifier (PKCE.challenge this_verifier));
       let params = [
         "grant_type", ["authorization_code"];
         "client_id", [keystring];
@@ -69,8 +70,6 @@ module Make
         "code", [this_code];
         "code_verifier", [this_verifier]
       ] in
-      let params_json = Format.asprintf {|{"grant_type":"authorization_code","client_id":"%s","redirect_uri":"%s","code":"%s","code_verifier":"%s"|}
-      keystring redirect_uri this_code this_verifier in
       let uri = Uri.make ~scheme ~host ~path () in
       Logs.debug (fun f -> f "asking for %s" (Uri.to_string uri));
       Client.post_form ~ctx:http_client ~params uri >>= fun (response, body) ->
@@ -78,7 +77,7 @@ module Make
       Logs.debug (fun f -> f "response from token get: %s" bstr);
       Lwt.return_unit
 
-  let maybe_initiate_state ~keystring kv http_client request =
+  let maybe_initiate_state ~keystring ~host kv http_client request =
     Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
     let request = Cohttp.Request.uri request in
     match Uri.get_query_param request "code", Uri.get_query_param request "state" with
@@ -102,7 +101,7 @@ module Make
           Lwt.return @@ ise
         | Ok () ->
           Logs.debug (fun f -> f "code retrieved and saved; requesting tokens");
-          Lwt.dont_wait (fun () -> request_token ~keystring kv http_client this_state) (fun _ -> ());
+          Lwt.dont_wait (fun () -> request_token ~keystring ~host kv http_client this_state) (fun _ -> ());
           Lwt.return @@ ok_empty
     end
 
@@ -121,7 +120,7 @@ module Make
       let meth = Cohttp.Request.meth request in
       match meth with
       | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" -> begin
-          maybe_initiate_state ~keystring kv http_client request
+          maybe_initiate_state ~keystring ~host kv http_client request
       end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
         Cohttp_lwt__.Body.to_string body >>= fun bstr ->
