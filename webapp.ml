@@ -23,6 +23,9 @@ module Make
   let code = Mirage_kv.Key.v "code"
   let state = Mirage_kv.Key.v "state"
   let verifier = Mirage_kv.Key.v "verifier"
+  let access = Mirage_kv.Key.v "access"
+  let refresh = Mirage_kv.Key.v "refresh"
+  let expiration = Mirage_kv.Key.v "expires_in"
 
   let start_auth kv =
     let new_state = PKCE.verifier () in
@@ -48,6 +51,31 @@ module Make
     Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
     Cohttp_lwt__.Body.empty)
 
+  let maybe_store kv state body =
+    let store kv state access_token refresh_token seconds =
+      Lwt_result.both
+        (Lwt_result.both
+           (Kv.set kv Mirage_kv.Key.(v state // access) access_token)
+           (Kv.set kv Mirage_kv.Key.(v state // refresh) refresh_token))
+        (Kv.set kv Mirage_kv.Key.(v state // expiration) seconds) >>= function
+      | Error e ->
+        Logs.err (fun f -> f "error writing tokens: %a" Kv.pp_write_error e);
+        Lwt.return_unit
+      | Ok _ -> Lwt.return_unit
+    in
+    try
+      let result = Yojson.Safe.from_string body in
+      let open Yojson.Safe.Util in
+      match member "access_token" result, member "refresh_token" result, member "expires_in" result with
+      | `String access_token, `String refresh_token, `Int expires_in ->
+        store kv state access_token refresh_token (string_of_int expires_in)
+      | _, _, _ -> Logs.err (fun f -> f "response did not contain usable tokens & expiration");
+        Lwt.return_unit
+    with
+    | Yojson.Json_error s ->
+      Logs.debug (fun f -> f "exception handling token response from remote server: %s" s);
+      Lwt.return_unit
+
   let request_token ~keystring ~host kv http_client state =
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v state // verifier)) @@
@@ -62,11 +90,10 @@ module Make
       and path = "v3/public/oauth/token"
       and scheme = "https"
       in
-      Logs.debug (fun f -> f "asking for stuff with verifier %s, which goes with challenge %s" this_verifier (PKCE.challenge this_verifier));
       let params = [
         "grant_type", ["authorization_code"];
         "client_id", [keystring];
-        "redirect_uri", [redirect_uri]; (* TODO parameterize this *)
+        "redirect_uri", [redirect_uri];
         "code", [this_code];
         "code_verifier", [this_verifier]
       ] in
@@ -75,7 +102,7 @@ module Make
       Client.post_form ~ctx:http_client ~params uri >>= fun (response, body) ->
       Cohttp_lwt__.Body.to_string body >>= fun bstr ->
       Logs.debug (fun f -> f "response from token get: %s" bstr);
-      Lwt.return_unit
+      maybe_store kv state bstr
 
   let maybe_initiate_state ~keystring ~host kv http_client request =
     Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
