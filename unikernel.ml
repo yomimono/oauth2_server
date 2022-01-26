@@ -42,12 +42,18 @@ module Main
             let tls = `TLS (tls_cfg, `TCP 443) in
             let https =
               Logs.info (fun f -> f "(re-)initialized https listener");
-              http_server tls @@ OAuth2.reply ~keystring kv host start_time
+              http_server tls @@ OAuth2.reply ~keystring kv http_client host start_time
             in
             let expire = Time.sleep_ns renew_after in
             let http =
+              (* replacement service on port 80 is a tarpit *)
+              let tarpit _ _ _ = Lwt.return @@
+                (Cohttp.Response.make ~status:Cohttp.Code.(`Internal_server_error) (),
+                Cohttp_lwt__.Body.of_string "Internal server error")
+              in
               let port = `TCP 80 in
-              http_server port @@ OAuth2.reply ~keystring kv host start_time
+              http_server port @@
+                Http.make ~conn_closed:(fun _ -> ()) ~callback:tarpit ()
             in
             Lwt.pick [
               https ;

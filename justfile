@@ -47,6 +47,11 @@ unforward :
 start :
 	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --ipv4-gateway={{hypervisor_ip}}
 
+churn :
+	make clean
+	mirage configure -t hvt
+	make
+
 new :
 	#!/bin/bash
 	loc=$(curl -v -k --data uuid=$(dd if=/dev/urandom bs=16 count=1|base64) https://{{guest_ip}}/auth 2>&1 | grep location|cut -f3 -d' ')

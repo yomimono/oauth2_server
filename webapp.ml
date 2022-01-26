@@ -48,7 +48,7 @@ module Make
     Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
     Cohttp_lwt__.Body.empty)
 
-  let request_token ~keystring kv state =
+  let request_token ~keystring kv http_client state =
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v state // verifier)) @@
       Kv.get kv Mirage_kv.Key.(v state // code) >>= function
@@ -61,21 +61,24 @@ module Make
       and path = "v3/public/oauth/token"
       and scheme = "https"
       in
+      let redirect_uri = "https://" ^ host ^ "/etsy" in
       let params = [
         "grant_type", ["authorization_code"];
         "client_id", [keystring];
-        "redirect_uri", [ "https://" ^ host ^ "/etsy"]; (* TODO parameterize this *)
+        "redirect_uri", [redirect_uri]; (* TODO parameterize this *)
         "code", [this_code];
         "code_verifier", [this_verifier]
       ] in
+      let params_json = Format.asprintf {|{"grant_type":"authorization_code","client_id":"%s","redirect_uri":"%s","code":"%s","code_verifier":"%s"|}
+      keystring redirect_uri this_code this_verifier in
       let uri = Uri.make ~scheme ~host ~path () in
       Logs.debug (fun f -> f "asking for %s" (Uri.to_string uri));
-      Client.post_form ~params uri >>= fun (response, body) ->
+      Client.post_form ~ctx:http_client ~params uri >>= fun (response, body) ->
       Cohttp_lwt__.Body.to_string body >>= fun bstr ->
       Logs.debug (fun f -> f "response from token get: %s" bstr);
       Lwt.return_unit
 
-  let maybe_initiate_state ~keystring kv request =
+  let maybe_initiate_state ~keystring kv http_client request =
     Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
     let request = Cohttp.Request.uri request in
     match Uri.get_query_param request "code", Uri.get_query_param request "state" with
@@ -99,12 +102,11 @@ module Make
           Lwt.return @@ ise
         | Ok () ->
           Logs.debug (fun f -> f "code retrieved and saved; requesting tokens");
-          Lwt.dont_wait (fun () -> request_token ~keystring kv this_state) (fun _ -> ());
+          Lwt.dont_wait (fun () -> request_token ~keystring kv http_client this_state) (fun _ -> ());
           Lwt.return @@ ok_empty
     end
 
-
-  let reply ~keystring kv host _start_time =
+  let reply ~keystring kv http_client host _start_time =
     let maybe_serve_code this_state =
       Kv.get kv Mirage_kv.Key.(v this_state // code) >>= function
       | Error (`Not_found _) -> Lwt.return not_found
@@ -119,7 +121,7 @@ module Make
       let meth = Cohttp.Request.meth request in
       match meth with
       | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" -> begin
-          maybe_initiate_state ~keystring kv request
+          maybe_initiate_state ~keystring kv http_client request
       end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
         Cohttp_lwt__.Body.to_string body >>= fun bstr ->
