@@ -1,7 +1,7 @@
 cert_fs := "credstore.chamelon"
 webapp_fs := "webapp.chamelon"
 guest_ip := "10.0.0.2"
-fqdn := "stitchbridge.legitcreds.us"
+fqdn := "oauth2.example.com"
 hypervisor_ip := "10.0.0.1"
 hypervisor_uplink := "wlan0"
 hypervisor_tap := "tap100"
