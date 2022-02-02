@@ -10,7 +10,6 @@ creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
 	format --block-size=512 {{cert_fs}}
 	cat ~/oauth2_test_creds/keystring | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
-	cat ~/oauth2_test_creds/shared_secret | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /shared_secret -
 
 newdb :
 	dd if=/dev/zero of={{webapp_fs}} bs=1M count=1
