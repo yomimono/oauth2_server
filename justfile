@@ -60,4 +60,4 @@ new :
 extant :
 	#!/bin/bash
 	id=$(lfs_ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
-	curl --verbose -k --data state=${id} https://{{guest_ip}}/token
+	curl -k --data state=${id} https://{{guest_ip}}/token

@@ -133,7 +133,29 @@ module Make
       end
     end
 
-  let maybe_serve_token kv this_state =
+  let refresh_access kv ~keystring http_client this_state =
+    Kv.get kv Mirage_kv.Key.(v this_state // refresh) >>= function
+    | Error (`Not_found _) -> Lwt.return_unit
+    | Error e -> Logs.err (fun f -> f "getting refresh token: %a" Kv.pp_error e);
+      Lwt.return_unit
+    | Ok this_refresh ->
+      let params = [
+        "grant_type", ["refresh_token"];
+        "client_id", [keystring];
+        "refresh_token", [this_refresh];
+      ] in
+      let url = Uri.make ~scheme:"https" ~host:"api.etsy.com" ~path:"v3/public/oauth/token" () in
+      Logs.debug (fun f -> f "asking for token refresh");
+      Client.post_form ~ctx:http_client ~params url >>= fun (response, body) ->
+      Cohttp_lwt__.Body.to_string body >>= fun bstr ->
+      Logs.debug (fun f -> f "response from token refresh: %d" @@ Cohttp.Code.code_of_status @@ Cohttp.Response.status response);
+      match Cohttp.Code.code_of_status @@ Cohttp.Response.status response with
+      | 200 -> maybe_store_tokens kv this_state bstr
+      | n ->
+        Logs.err (fun f -> f "error %d from remote host when requesting refresh token" n);
+        Lwt.return_unit
+
+  let rec maybe_serve_token kv ~can_refresh ~keystring http_client this_state =
     (* how long are refresh tokens good for? *)
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v this_state // expiration))
@@ -158,15 +180,14 @@ module Make
         match Ptime.(of_span @@ Span.add valid_duration valid_time_start) with
         | None -> Lwt.return not_found
         | Some end_valid_time ->
-
           if Ptime.(is_later ~than:now end_valid_time) then
             Lwt.return @@ (Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
                            Cohttp_lwt__.Body.of_string access_token)
-          else begin
-            (* TODO: do the refresh transaction and get a new access token *)
+          else if can_refresh then begin
+            refresh_access kv ~keystring http_client this_state >>= fun () ->
+            maybe_serve_token kv ~can_refresh:false ~keystring http_client this_state
+          end else
             Lwt.return not_found
-
-          end
       with
       | Invalid_argument _ -> Lwt.return ise
 
@@ -182,7 +203,7 @@ module Make
           match List.assoc_opt "state" entries with
           | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
           | Some (this_state::[]) ->
-            maybe_serve_token kv this_state
+            maybe_serve_token kv ~can_refresh:true ~keystring http_client this_state
         end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
           Cohttp_lwt__.Body.to_form body >>= fun entries ->
