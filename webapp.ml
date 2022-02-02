@@ -27,14 +27,6 @@ module Make
   let refresh = Mirage_kv.Key.v "refresh"
   let expiration = Mirage_kv.Key.v "expires_in"
 
-  let start_auth kv =
-    let new_state = PKCE.verifier () in
-    let new_verifier = PKCE.verifier () in
-    Kv.set kv Mirage_kv.Key.(v new_state // verifier) new_verifier >>= function
-    | Error e -> Logs.err (fun f -> f "error storing new state and verifier: %a" Kv.pp_write_error e);
-      Lwt.return @@ Error `Storage
-    | Ok () -> Lwt.return @@ Ok (new_state, new_verifier)
-
   let not_found = (
     Cohttp.Response.make ~status:Cohttp.Code.(`Not_found) (),
     Cohttp_lwt__.Body.of_string "Not found")
@@ -51,7 +43,15 @@ module Make
     Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
     Cohttp_lwt__.Body.empty)
 
-  let maybe_store kv state body =
+  let start_auth kv =
+    let new_state = PKCE.verifier () in
+    let new_verifier = PKCE.verifier () in
+    Kv.set kv Mirage_kv.Key.(v new_state // verifier) new_verifier >>= function
+    | Error e -> Logs.err (fun f -> f "error storing new state and verifier: %a" Kv.pp_write_error e);
+      Lwt.return @@ Error `Storage
+    | Ok () -> Lwt.return @@ Ok (new_state, new_verifier)
+
+  let maybe_store_tokens kv state body =
     let store kv state access_token refresh_token seconds =
       Lwt_result.both
         (Lwt_result.both
@@ -102,7 +102,7 @@ module Make
       Client.post_form ~ctx:http_client ~params uri >>= fun (response, body) ->
       Cohttp_lwt__.Body.to_string body >>= fun bstr ->
       Logs.debug (fun f -> f "response from token get: %s" bstr);
-      maybe_store kv state bstr
+      maybe_store_tokens kv state bstr
 
   let maybe_initiate_state ~keystring ~host kv http_client request =
     Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
@@ -120,7 +120,7 @@ module Make
       | Ok None -> Lwt.return @@ bad_request
       | Ok (Some `Value) -> Logs.err (fun f -> f "state was a value, not a dictionary; refusing to store code");
         Lwt.return @@ ise
-      | Ok (Some `Dictionary) ->
+      | Ok (Some `Dictionary) -> begin
         Kv.set kv Mirage_kv.Key.(v this_state // code) this_code >>= function
         | Error e -> Logs.err (fun f -> f
             "got a valid looking code for a real state, \
@@ -130,35 +130,59 @@ module Make
           Logs.debug (fun f -> f "code retrieved and saved; requesting tokens");
           Lwt.dont_wait (fun () -> request_token ~keystring ~host kv http_client this_state) (fun _ -> ());
           Lwt.return @@ ok_empty
+      end
     end
 
-  let reply ~keystring kv http_client host _start_time =
-    let maybe_serve_code this_state =
-      Kv.get kv Mirage_kv.Key.(v this_state // code) >>= function
-      | Error (`Not_found _) -> Lwt.return not_found
-      | Error e -> Logs.err (fun f -> f "getting code for client: %a" Kv.pp_error e);
-        Lwt.return ise
-      | Ok this_code ->
-        Lwt.return @@ (Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
-        Cohttp_lwt__.Body.of_string this_code)
-    in
+  let maybe_serve_token kv this_state =
+    (* how long are refresh tokens good for? *)
+    Lwt_result.both 
+      (Kv.get kv Mirage_kv.Key.(v this_state // expiration))
+    @@
+    Lwt_result.both
+      (Kv.get kv Mirage_kv.Key.(v this_state // access))
+      (Kv.last_modified kv Mirage_kv.Key.(v this_state // access))
+    >>= function
+    | Error (`Not_found _) -> Lwt.return not_found
+    | Error e -> Logs.err (fun f -> f "getting access code for client: %a" Kv.pp_error e);
+      Lwt.return ise
+    | Ok (expiration, (access_token, modified_time)) ->
+      let valid_duration =
+        try Ptime.Span.of_int_s @@ int_of_string expiration with
+        | Invalid_argument _ -> Ptime.Span.of_int_s 3600
+      in
+      (* we don't have any particularly good reason to assume that last_modified
+       * isn't some malicious-ass garbage, so make sure we handle that case *)
+      try
+        let valid_time_start = Ptime.Span.v modified_time in
+        let now = Clock.now_d_ps () |> Ptime.v in
+        match Ptime.(of_span @@ Span.add valid_duration valid_time_start) with
+        | None -> Lwt.return not_found
+        | Some end_valid_time ->
+
+          if Ptime.(is_later ~than:now end_valid_time) then
+            Lwt.return @@ (Cohttp.Response.make ~status:Cohttp.Code.(`OK) (),
+                           Cohttp_lwt__.Body.of_string access_token)
+          else begin
+            (* TODO: do the refresh transaction and get a new access token *)
+            Lwt.return not_found
+
+          end
+      with
+      | Invalid_argument _ -> Lwt.return ise
+
+  let serve ~keystring kv http_client host =
     let callback _connection request body =
       let endpoint = Mirage_kv.Key.v @@ Uri.path @@ Cohttp.Request.uri request in
       let meth = Cohttp.Request.meth request in
       match meth with
-      | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" -> begin
+      | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
           maybe_initiate_state ~keystring ~host kv http_client request
-      end
-      | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/etsy" ->
-        Cohttp_lwt__.Body.to_string body >>= fun bstr ->
-        Logs.debug (fun f -> f "POST to /etsy: %s" bstr);
-        Lwt.return ise
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/token" ->
           Cohttp_lwt__.Body.to_form body >>= fun entries -> begin
           match List.assoc_opt "state" entries with
           | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
           | Some (this_state::[]) ->
-            maybe_serve_code this_state
+            maybe_serve_token kv this_state
         end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
           Cohttp_lwt__.Body.to_form body >>= fun entries ->

@@ -1,6 +1,5 @@
 open Lwt.Infix
 
-
 module Main
     (Cert_block : Mirage_block.S)
     (App_block : Mirage_block.S)
@@ -18,7 +17,6 @@ module Main
 
   let start cert_block app_block pclock _time _random http_server http_client =
     let open Lwt.Infix in
-    let start_time = Ptime.v @@ Pclock.now_d_ps () in
     let host = Key_gen.host () in
     Logs_reporter.(create pclock |> run) @@ fun () ->
     (* solo5 requires us to use a block size of, at maximum, 512 *)
@@ -42,7 +40,7 @@ module Main
             let tls = `TLS (tls_cfg, `TCP 443) in
             let https =
               Logs.info (fun f -> f "(re-)initialized https listener");
-              http_server tls @@ OAuth2.reply ~keystring kv http_client host start_time
+              http_server tls @@ OAuth2.serve ~keystring kv http_client host
             in
             let expire = Time.sleep_ns renew_after in
             let http =
