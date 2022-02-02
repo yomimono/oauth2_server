@@ -10,6 +10,8 @@ Most systems using OAuth2 in this way have some sort of local authentication whi
 
 This server is a low-effort proof-of-concept implementation, and as such probably responds in unhelpful ways to lots of inputs.
 
+There is currently no rate-limiting on requests, which should give the potential user some pause when combined with the first item in this list.
+
 # what's implemented?
 
 ## endpoints and their happy paths
@@ -30,6 +32,7 @@ This server is a low-effort proof-of-concept implementation, and as such probabl
 # what's not implemented, but hopefully someday will be?
 
 * garbage collection of expired state items
+* rate limiting
 * a nice service on port 80 that redirects you to the TLS server
 * user-friendly HTTP bodies for browser rendering
 * useful errors in responses for bad state
