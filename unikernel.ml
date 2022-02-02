@@ -33,7 +33,8 @@ module Main
         | Error e -> Logs.err (fun f -> f "failed to initialize block-backed key-value store for appplication: %a" App_database.pp_error e);
           Lwt.return_unit
         | Ok kv ->
-          LE.provision host cert_kv http_server http_client >>= fun ((certificates, pk), renew_after) ->
+          let start_time = Clock.now_d_ps () |> Ptime.Span.v in
+          LE.provision host cert_kv http_server http_client start_time >>= fun ((certificates, pk), renew_after) ->
           Logs.debug (fun f -> f "usable certificates found in the cert store (valid for %Ld ns)" renew_after);
           let rec provision () =
             let tls_cfg = Tls.Config.server ~certificates:(`Single (certificates, pk)) () in

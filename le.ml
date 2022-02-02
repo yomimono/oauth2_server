@@ -113,12 +113,26 @@ module Make
       | Error (`Msg s), _ -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
       | _, Error (`Msg s) -> Lwt.return @@ Error (`Msg (Format.asprintf "error decoding certificate list: %s" s))
 
-  let rec provision host kv http_server_impl http_client =
+  let rec provision host kv http_server_impl http_client start_time =
     let open Lwt.Infix in
     retrieve kv >>= function
-    | Ok (cert, pk) ->
-      (* TODO: figure out the real correct amount of time to wait before renewing *)
-      Lwt.return ((cert, pk), Duration.of_day 80)
+    | Ok (certs, pk) -> begin
+      let soonest time_a time_b =
+        if Ptime.is_earlier ~than:time_a time_b then time_b else time_a
+      in
+      let first_expiration = List.fold_left (fun acc c ->
+          soonest acc @@ snd @@ X509.Certificate.validity c
+        ) Ptime.max certs
+      in
+      let default_duration = Duration.of_day 7 in
+      match Ptime.sub_span first_expiration start_time with
+      | None -> Lwt.return ((certs, pk), default_duration)
+      | Some wait_time ->
+        match Ptime.to_span wait_time |> Ptime.Span.to_int_s with
+        | None -> Lwt.return ((certs, pk), default_duration)
+        | Some n when n < 0 -> Lwt.return ((certs, pk), default_duration)
+        | Some expiration -> Lwt.return ((certs, pk), (Duration.of_sec expiration))
+    end
     | Error (`Msg s) ->
       Logs.debug (fun f -> f "error getting cert and pk from the cert store: %s" s);
       Logs.info (fun m -> m "listening on tcp/%d for Let's Encrypt provisioning" http_port);
@@ -133,7 +147,7 @@ module Make
         (* Since the error may be transient, wait a bit and try again *)
         Logs.err (fun f -> f "waiting %d minutes, then trying again" wait_duration);
         Time.sleep_ns (Duration.of_min wait_duration) >>= fun () ->
-        provision host kv http_server_impl http_client
+        provision host kv http_server_impl http_client start_time
       | Ok (certificates, pk) ->
         let certs_to_save = X509.Certificate.encode_pem_multiple certificates in
         let pk_to_save = X509.Private_key.encode_pem pk in
