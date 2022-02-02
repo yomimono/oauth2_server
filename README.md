@@ -14,21 +14,18 @@ This server is a low-effort proof-of-concept implementation, and as such probabl
 
 ## endpoints and their happy paths
 
-* `/auth`
-    * POST `uuid=16randombytes`:
-    	* server generates and stores a new `state` and accompanying PKCE verifier
-	* server redirects the client to Etsy's `oauth/connect` endpoint with `state`, `code_challenge`, etc
-* `/etsy`
-    * GET `?code=etsycode&state=somestate`:
-        * server retrieves the PKCE verifier for `somestate`
-        * server stores `etsycode` for `somestate`
-	* server initiates a token request to Etsy with `etsycode` and the PKCE verifier for `somestate`
-	* server stores the `access_token` and `refresh_token` for `etsycode` and `somestate`
-* `/token`
-    * POST `state=somestate`:
-        * server retrieves `access_token` for `somestate`
-	* if `access_token` is too old, server gets a new one with `refresh_token`
-	* if `access_token` is still valid, server gives it to client
+* `/auth` : POST `uuid=16randombytes`
+   * server generates and stores a new `state` and accompanying PKCE verifier
+   * server redirects the client to Etsy's `oauth/connect` endpoint with `state`, `code_challenge`, etc
+* `/etsy` : GET `?code=etsycode&state=somestate`
+   * server retrieves the PKCE verifier for `somestate`
+   * server stores `etsycode` for `somestate`
+   * server initiates a token request to Etsy with `etsycode` and the PKCE verifier for `somestate`
+   * server stores the `access_token` and `refresh_token` for `etsycode` and `somestate`
+* `/token` : POST `state=somestate`
+   * server retrieves `access_token` for `somestate`
+   * if `access_token` is too old, server gets a new one with `refresh_token`
+   * if `access_token` is still valid, server gives it to client
 
 # what's not implemented, but hopefully someday will be?
 
