@@ -10,7 +10,7 @@ Most systems using OAuth2 in this way have some sort of local authentication whi
 
 This server is a low-effort proof-of-concept implementation, and as such probably responds in unhelpful ways to lots of inputs.
 
-There is currently no rate-limiting on requests, which should give the potential user some pause when combined with the first item in this list.
+There is currently no rate-limiting on requests, which might give the potential user some pause when combined with the first item in this list.  Given an adequate entropy source and CSPRNG, states shouldn't be guessable.  The more likely problem is the ease of resource exhaustion attacks, since storage is allocated for each new `state` and currently never removed.
 
 # what's implemented?
 
