@@ -60,3 +60,10 @@ extant :
 	#!/bin/bash
 	id=$(lfs_ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
 	curl -k --data state=${id} https://{{guest_ip}}/token
+
+loadtest :
+	#!/bin/bash
+	echo "uuid=16charsnwdyaget" > loadtest
+	vegeta_content="POST https://{{fqdn}}/auth"
+	echo "$vegeta_content" | vegeta attack -body loadtest -duration 5s | vegeta report
+	rm loadtest || true
