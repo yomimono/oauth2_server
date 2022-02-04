@@ -193,6 +193,9 @@ module Make
 
   let serve ~keystring kv http_client host =
     let callback _connection request body =
+      (* Cohttp_lwt says we need to always "drain" the body,
+       * even though in most cases we won't look at it *)
+      Cohttp_lwt__.Body.to_form body >>= fun entries ->
       let endpoint = Mirage_kv.Key.v @@ Uri.path @@ Cohttp.Request.uri request in
       let meth = Cohttp.Request.meth request in
       match meth with
@@ -206,7 +209,6 @@ module Make
             maybe_serve_token kv ~can_refresh:true ~keystring http_client this_state
         end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
-          Cohttp_lwt__.Body.to_form body >>= fun entries ->
           match List.assoc_opt "uuid" entries with
           | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
           | Some (uuid::[]) ->
