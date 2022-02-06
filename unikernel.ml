@@ -1,6 +1,5 @@
 open Lwt.Infix
 
-let expiration_span = Ptime.Span.v (75, 0L)
 let gc_interval = Duration.of_hour 1
 
 module Main
@@ -59,7 +58,7 @@ module Main
               http_server port @@
                 Http.make ~conn_closed:(fun _ -> ()) ~callback:tarpit ()
             in
-            let gc = Recycle.prune kv expiration_span in
+            let gc = Recycle.prune kv Resource.expiration_span in
             let rec keep_pruning () =
               gc >>= fun () ->
               Time.sleep_ns gc_interval >>= fun () ->
