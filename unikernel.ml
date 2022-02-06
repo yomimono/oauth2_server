@@ -1,5 +1,8 @@
 open Lwt.Infix
 
+let expiration_span = Ptime.Span.v (75, 0L)
+let gc_interval = Duration.of_hour 1
+
 module Main
     (Cert_block : Mirage_block.S)
     (App_block : Mirage_block.S)
@@ -14,6 +17,7 @@ module Main
   module App_database = Kv.Make(App_block)(Clock)
   module LE = Le.Make(Cert_database)(Time)(Http)(Client)
   module OAuth2 = Webapp.Make(Random)(Clock)(App_database)(Http)(Client)
+  module Recycle = Recycler.Make(Clock)(App_database)
 
   let start cert_block app_block pclock _time _random http_server http_client =
     let open Lwt.Infix in
@@ -55,10 +59,18 @@ module Main
               http_server port @@
                 Http.make ~conn_closed:(fun _ -> ()) ~callback:tarpit ()
             in
+            let gc = Recycle.prune kv expiration_span in
+            let rec keep_pruning () =
+              gc >>= fun () ->
+              Time.sleep_ns gc_interval >>= fun () ->
+              keep_pruning ()
+            in
             Lwt.pick [
               https ;
               http ;
-              expire] >>= fun () ->
+              expire;
+              keep_pruning ();
+            ] >>= fun () ->
             provision ()
           in
           provision ()
