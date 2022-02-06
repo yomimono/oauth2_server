@@ -23,7 +23,11 @@ let host =
   let doc = Key.Arg.info ~doc:"Fully-qualified domain name for the server. Certificates will be requested from Let's Encrypt for this name." ["host"] in
   Key.(create "host" Arg.(required string doc))
 
-let keys = List.map Key.abstract [ host ]
+let redirect_uri_path =
+  let doc = Key.Arg.info ~doc:"Path to use with [host] as redirect_uri in outgoing requests. This should look like the path component of a URI, e.g. /oauth/connect" ["path"] in
+  Key.(create "path" Arg.(required string doc))
+
+let keys = List.map Key.abstract [ host; redirect_uri_path ]
 
 let main =
   foreign ~packages ~keys "Unikernel.Main" (block @-> block @-> pclock @-> time @-> random @-> http @-> http_client @-> job)

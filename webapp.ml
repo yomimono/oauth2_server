@@ -76,7 +76,7 @@ module Make
       Logs.debug (fun f -> f "exception handling token response from remote server: %s" s);
       Lwt.return_unit
 
-  let request_token ~keystring ~host kv http_client state =
+  let request_token ~keystring ~host ~path kv http_client state =
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v state // verifier)) @@
       Kv.get kv Mirage_kv.Key.(v state // code) >>= function
@@ -85,11 +85,7 @@ module Make
     | Ok (this_verifier, this_code) ->
       Logs.debug (fun f -> f "constructing request for tokens");
       (* this is where we have to make our own request to the remote server *)
-      let redirect_uri = "https://" ^ host ^ "/etsy" in
-      let host = "api.etsy.com"
-      and path = "v3/public/oauth/token"
-      and scheme = "https"
-      in
+      let redirect_uri = "https://" ^ host ^ path in
       let params = [
         "grant_type", ["authorization_code"];
         "client_id", [keystring];
@@ -97,14 +93,14 @@ module Make
         "code", [this_code];
         "code_verifier", [this_verifier]
       ] in
-      let uri = Uri.make ~scheme ~host ~path () in
+      let uri = Resource.auth_url in
       Logs.debug (fun f -> f "asking for %s" (Uri.to_string uri));
       Client.post_form ~ctx:http_client ~params uri >>= fun (response, body) ->
       Cohttp_lwt__.Body.to_string body >>= fun bstr ->
       Logs.debug (fun f -> f "response from token get: %s" bstr);
       maybe_store_tokens kv state bstr
 
-  let maybe_initiate_state ~keystring ~host kv http_client request =
+  let maybe_initiate_state ~keystring ~host ~path kv http_client request =
     Logs.debug (fun f -> f "HI ETSY: %s" @@ Uri.to_string @@ Cohttp.Request.uri request);
     let request = Cohttp.Request.uri request in
     match Uri.get_query_param request "code", Uri.get_query_param request "state" with
@@ -114,7 +110,7 @@ module Make
     | Some this_code, Some this_state -> begin
       let this_code = Uri.pct_decode this_code in
       let this_state = Uri.pct_decode this_state in
-      Kv.exists kv (Mirage_kv.Key.v this_state) >>= function
+      Kv.exists kv @@ Mirage_kv.Key.v this_state >>= function
       | Error e -> Logs.err (fun f -> f "error retrieving a state: %a" Kv.pp_error e);
         Lwt.return @@ ise
       | Ok None -> Lwt.return @@ bad_request
@@ -128,7 +124,7 @@ module Make
           Lwt.return @@ ise
         | Ok () ->
           Logs.debug (fun f -> f "code retrieved and saved; requesting tokens");
-          Lwt.dont_wait (fun () -> request_token ~keystring ~host kv http_client this_state) (fun _ -> ());
+          Lwt.dont_wait (fun () -> request_token ~keystring ~path ~host kv http_client this_state) (fun _ -> ());
           Lwt.return @@ ok_empty
       end
     end
@@ -144,7 +140,7 @@ module Make
         "client_id", [keystring];
         "refresh_token", [this_refresh];
       ] in
-      let url = Uri.make ~scheme:"https" ~host:"api.etsy.com" ~path:"v3/public/oauth/token" () in
+      let url = Resource.auth_url in
       Logs.debug (fun f -> f "asking for token refresh");
       Client.post_form ~ctx:http_client ~params url >>= fun (response, body) ->
       Cohttp_lwt__.Body.to_string body >>= fun bstr ->
@@ -156,7 +152,6 @@ module Make
         Lwt.return_unit
 
   let rec maybe_serve_token kv ~can_refresh ~keystring http_client this_state =
-    (* how long are refresh tokens good for? *)
     Lwt_result.both 
       (Kv.get kv Mirage_kv.Key.(v this_state // expiration))
     @@
@@ -170,7 +165,7 @@ module Make
     | Ok (expiration, (access_token, modified_time)) ->
       let valid_duration =
         try Ptime.Span.of_int_s @@ int_of_string expiration with
-        | Invalid_argument _ -> Ptime.Span.of_int_s 3600
+        | Invalid_argument _ -> Resource.default_access_expiration
       in
       (* we don't have any particularly good reason to assume that last_modified
        * isn't some malicious-ass garbage, so make sure we handle that case *)

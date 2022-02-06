@@ -18,6 +18,7 @@ module Main
   let start cert_block app_block pclock _time _random http_server http_client =
     let open Lwt.Infix in
     let host = Key_gen.host () in
+    let path = Key_gen.path () in
     Logs_reporter.(create pclock |> run) @@ fun () ->
     (* solo5 requires us to use a block size of, at maximum, 512 *)
     Cert_database.connect ~program_block_size:16 ~block_size:512 cert_block >>= function
@@ -41,7 +42,7 @@ module Main
             let tls = `TLS (tls_cfg, `TCP 443) in
             let https =
               Logs.info (fun f -> f "(re-)initialized https listener");
-              http_server tls @@ OAuth2.serve ~keystring kv http_client host
+              http_server tls @@ OAuth2.serve ~keystring ~host ~path kv http_client
             in
             let expire = Time.sleep_ns renew_after in
             let http =
