@@ -232,7 +232,7 @@ module Make
             in
             let headers = Cohttp.Header.init_with "Location" (Uri.to_string url) in
             let response = Cohttp.Response.make ~status:Cohttp.Code.(`Temporary_redirect) ~headers () in
-            let body = Cohttp_lwt__.Body.of_string "<html><body>Redirecting...</body></html>" in
+            let body = Cohttp_lwt__.Body.of_string state in
             Lwt.return (response, body)
           | _ -> Lwt.return @@ ise
     in
