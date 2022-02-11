@@ -1,14 +1,14 @@
 cert_fs := "credstore.chamelon"
 webapp_fs := "webapp.chamelon"
 guest_ip := "10.0.0.2"
-fqdn := "oauth2.example.com"
+fqdn := "we-have.legitcreds.us"
 hypervisor_ip := "10.0.0.1"
 hypervisor_uplink := "eth0"
 hypervisor_tap := "tap100"
 path := "/etsy"
 
 start :
-	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --path={{path}} --ipv4-gateway={{hypervisor_ip}}
+	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- dist/oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --path={{path}} --ipv4-gateway={{hypervisor_ip}}
 
 creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
