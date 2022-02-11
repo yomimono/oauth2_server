@@ -8,7 +8,7 @@ hypervisor_tap := "tap100"
 path := "/etsy"
 
 start :
-	sudo solo5-hvt --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- dist/oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --path={{path}} --ipv4-gateway={{hypervisor_ip}}
+	sudo solo5-hvt --mem=64 --net:service={{hypervisor_tap}} --block:webapp={{webapp_fs}} --block:certs={{cert_fs}} -- dist/oauth2.hvt --backtrace=true -l "application:debug" --host={{fqdn}} --path={{path}} --ipv4-gateway={{hypervisor_ip}}
 
 creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
