@@ -200,13 +200,16 @@ module Make
       | `GET when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v path ->
         maybe_initiate_state ~keystring ~host ~path kv http_client request
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/token" ->
-        Cohttp_lwt__.Body.to_form body >>= fun entries -> begin
+        begin
+          Logs.debug (fun f -> f "entries: %a" Fmt.(list string) (List.map fst entries));
           match List.assoc_opt "state" entries with
-          | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
+          | None -> Logs.debug (fun f -> f "no state"); Lwt.return bad_request
+          | Some [] | Some (_::_::_) -> Lwt.return bad_request
           | Some (this_state::[]) ->
             maybe_serve_token kv ~can_refresh:true ~keystring http_client this_state
         end
       | `POST when Mirage_kv.Key.equal endpoint @@ Mirage_kv.Key.v "/auth" ->
+        Logs.debug (fun f -> f "entries: %a" Fmt.(list string) (List.map fst entries));
         match List.assoc_opt "uuid" entries with
         | None | Some [] | Some (_::_::_) -> Lwt.return bad_request
         | Some (uuid::[]) ->
