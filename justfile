@@ -12,12 +12,12 @@ start :
 
 creds :
 	dd if=/dev/zero of={{cert_fs}} bs=4K count=4
-	format --block-size=512 {{cert_fs}}
-	cat ~/oauth2_test_creds/keystring | tr -d '\n' | lfs_write --verbosity=debug {{cert_fs}} 512 /keystring -
+	chamelon format --block-size=512 {{cert_fs}}
+	cat ~/oauth2_test_creds/keystring | tr -d '\n' | chamelon write --verbosity=debug {{cert_fs}} 512 /keystring -
 
 newdb :
 	dd if=/dev/zero of={{webapp_fs}} bs=1M count=1
-	format --block-size=512 {{webapp_fs}}
+	chamelon format --block-size=512 {{webapp_fs}}
 
 tap :
 	sudo ip tuntap add {{hypervisor_tap}} mode tap
@@ -59,7 +59,7 @@ new :
 
 extant :
 	#!/bin/bash
-	id=$(lfs_ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
+	id=$(chamelon ls {{webapp_fs}} 512 /|head -1|cut -d' ' -f1)
 	curl -k --data state=${id} https://{{guest_ip}}/token
 
 loadtest :
