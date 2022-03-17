@@ -40,7 +40,6 @@ There is currently no rate-limiting on requests, which might give the potential 
 
 # what do I need to run this?
 
-* [`chamelon`](https://github.com/yomimono/chamelon), which is not yet available via the public OPAM repository but can be installed with `opam pin add chamelon https://github.com/yomimono/chamelon.git`
 * an Etsy developer key
 * a publicly-registered FQDN corresponding to a public IP where you can run a unikernel
 * a registered callback URI for your application corresponding to the above FQDN with the /etsy endpoint
