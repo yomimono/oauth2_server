@@ -24,7 +24,7 @@ module Main
     let path = Key_gen.path () in
     Logs_reporter.(create pclock |> run) @@ fun () ->
     (* solo5 requires us to use a block size of, at maximum, 512 *)
-    Cert_database.connect ~program_block_size:16 ~block_size:512 cert_block >>= function
+    Cert_database.connect ~program_block_size:16 cert_block >>= function
     | Error e -> Logs.err (fun f -> f "failed to initialize block-backed key-value store for certs: %a" Cert_database.pp_error e);
       Lwt.return_unit
     | Ok cert_kv ->
@@ -33,7 +33,7 @@ module Main
       | Error e -> Logs.err (fun f -> f "Couldn't retrieve the keystring from the cert store: %a" Cert_database.pp_error e);
         Lwt.return_unit
       | Ok keystring ->
-        App_database.connect ~program_block_size:16 ~block_size:512 app_block >>= function
+        App_database.connect ~program_block_size:16 app_block >>= function
         | Error e -> Logs.err (fun f -> f "failed to initialize block-backed key-value store for appplication: %a" App_database.pp_error e);
           Lwt.return_unit
         | Ok kv ->
